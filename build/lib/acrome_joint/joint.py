@@ -8,7 +8,7 @@ import hashlib
 import tempfile
 from stm32loader.main import main as stm32loader_main
 import enum
-from joint_devices.Slave_Device import *
+from acrome_joint.Slave_Device import *
 
 
 # enter here for extra commands: 

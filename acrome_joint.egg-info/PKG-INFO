@@ -1,7 +1,7 @@
 Metadata-Version: 2.4
-Name: acrome-smd-beta
-Version: 0.0.4
-Summary: Python library for interfacing with Acrome Robotic Arm Joint BLDC Motor Controllers (Beta Version) 
+Name: acrome-joint
+Version: 0.0.1
+Summary: Python library for interfacing with Acrome Robotic Arm Joint BLDC Motor Controllers  
 Home-page: https://github.com/Acrome-Smart-Motion-Devices/python-library-new
 Author: BeratComputer
 Author-email: beratdogan@acrome.net

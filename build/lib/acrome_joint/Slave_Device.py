@@ -3,7 +3,7 @@ import struct
 from crccheck.crc import Crc32Mpeg2 as CRC32
 import time
 import enum
-from joint_devices.serial_port import SerialPort
+from acrome_joint.serial_port import SerialPort
 '''
 COMMUNICATION PACKAGE => 
 HEADER, ID, DEVICE_FAMILY, PACKAGE_SIZE, COMMAND, STATUS, .............. DATA ................. , CRC

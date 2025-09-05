@@ -1,11 +1,7 @@
-from joint_devices.joint import *
+from acrome_joint.joint import *
 
 port = SerialPort("COM14", baudrate=921600, timeout=0.1, isTest=False)
 dev = Joint(0, port)
-
-
-
-
 
 while True:
     #input()
