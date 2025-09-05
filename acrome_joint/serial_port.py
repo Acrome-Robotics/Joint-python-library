@@ -1,4 +1,35 @@
 import serial
+import serial.tools.list_ports
+import platform
+
+def whichOS():
+    return platform.system()
+
+
+def USB_serial_port(keyword_for_WINDOWS:str='USB Serial Port', keyword_for_LINUX:str='/dev/ttyUSB'):
+
+    if whichOS() == "Windows":
+        ports = list(serial.tools.list_ports.comports())
+        if ports:
+            for port, desc, hwid in sorted(ports):
+                #print(f"{port}: {desc} [{hwid}]")
+                #print(type(port))
+                if keyword_for_WINDOWS in desc:
+                    return port
+        else:
+            return None
+        
+    if whichOS() == "Linux":
+        ports = list(serial.tools.list_ports.comports())
+        if ports:
+            for port, desc, hwid in sorted(ports):
+                #print(f"{port}: {desc} [{hwid}]")
+                #print(type(port))
+                if keyword_for_LINUX in port:
+                    return port
+        else:
+            return None
+
 
 class SerialPort:
     def __init__(self, port_name, baudrate=921600, timeout=0.1, isTest:bool=False):
@@ -54,6 +85,4 @@ class SerialPort:
             print(f"port timeout update to {timeout} (TEST!)")
         else:
             self._ph.timeout = timeout
-
-
 

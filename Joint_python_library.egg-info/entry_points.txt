@@ -1,0 +1,2 @@
+[console_scripts]
+joint_GUI = gui.main:main
