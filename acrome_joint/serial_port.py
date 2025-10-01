@@ -6,6 +6,28 @@ def whichOS():
     return platform.system()
 
 
+def list_USB_serial_ports():
+    _list = []
+    if whichOS() == "Windows":
+        ports = list(serial.tools.list_ports.comports())
+        if ports:
+            for port, desc, hwid in sorted(ports):
+                _list.append(desc)
+        else:
+            return None
+        
+    if whichOS() == "Linux":
+        ports = list(serial.tools.list_ports.comports())
+        if ports:
+            for port, desc, hwid in sorted(ports):
+                _list.append(desc)
+        else:
+            return None
+        
+    return _list
+
+
+
 def USB_serial_port(keyword_for_WINDOWS:str='USB Serial Port', keyword_for_LINUX:str='/dev/ttyUSB'):
 
     if whichOS() == "Windows":

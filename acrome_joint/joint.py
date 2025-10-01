@@ -74,8 +74,8 @@ Index_Joint = enum.IntEnum('Index', [
 
 
 
-def scan_blue_devices(port:SerialPort):
-	device = Blue(0, port)
+def scan_joint_devices(port:SerialPort):
+	device = Joint(0, port)
 	available_devices = []
 
 	for id in range(0,255):
