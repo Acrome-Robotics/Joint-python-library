@@ -278,6 +278,9 @@ class Joint(Slave_Device):
 		self.set_variables([Index_Joint.Config_Description, text])
 		self._post_sleep()
 
+	def set_variables_sync(self, *idx_val_pairs, ack=False):
+		return super().set_variables(*idx_val_pairs, ack=ack)
+
 
 
 	def get_FOC_parameters(self, package_number:int):

@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="Joint-python-library",
-    version="0.0.5",
+    version="0.0.6",
     author="BeratComputer",
     author_email="beratdogan@acrome.net",
     description="Python library for interfacing with Acrome Robotic Arm Joint BLDC Motor Controllers. This Python library provides an easy-to-use interface for communication and control of BLDC motor controllers used in Acrome robotic arm joints. It is designed to simplify the integration of Acrome’s robotic joint actuators into custom applications, allowing developers and researchers to focus on building advanced robotic systems without dealing with low-level communication details.",
