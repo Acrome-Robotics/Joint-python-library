@@ -10,6 +10,7 @@ HEADER, ID, DEVICE_FAMILY, PACKAGE_SIZE, COMMAND, STATUS, .............. DATA ..
 '''
 
 PING_PACKAGE_SIZE = 10
+BROADCAST_ID = 255
 
 #Classical Device Indexes
 Index_Device_Classical = enum.IntEnum('Index', [
@@ -86,7 +87,9 @@ class Slave_Device():
     SERIAL_HEADER = 0x55
     _BROADCAST_ID = 0xFF
 
-    _BATCH_ID = 254
+    # NEW: device_family → variables (Data_ list) kaydı
+    _vars_registry = {}  # { device_family:int : [Data_, Data_, ...] }
+
     def __init__(self, id, device_family, variables, port:SerialPort):
         self._port = port
         self._header = self.SERIAL_HEADER
@@ -97,6 +100,7 @@ class Slave_Device():
         self.__post_sleep = 0.01
         self.__device_init_sleep = 3
         self.write_ack_enable = False
+        Slave_Device._vars_registry.setdefault(device_family, variables)
 
     def enable_get_ack(self):
         self.write_ack_enable = True
@@ -312,3 +316,107 @@ class Data_():
 	
     def type(self) -> str:
         return self.__type
+
+
+
+def write_sync_to_many(
+    port: SerialPort,
+    device_family: int,
+    index: int,
+    *id_value_pairs,
+    expect_ack: bool = False
+) -> bool:
+    """
+    Aynı değişken index'ini birden fazla cihaza WRITE_SYNC ile yazar.
+    Değer tipi, device_family'nin kayıtlı değişken tablosundan otomatik çekilir.
+
+    Args:
+        port (SerialPort): paylaşılan seri port
+        device_family (int): ürün ailesi (ör. Joint için 0xDA)
+        index (int | enum.IntEnum): yazılacak değişken indeksi
+        *id_value_pairs: [id, value] çiftleri (list/tuple), örn: [0, 123], [1, -45], ...
+        expect_ack (bool): ACK beklenip beklenmeyeceği
+
+    Returns:
+        bool: True = yazdı (veya ACK doğrulandı); False = ACK bekleniyorsa doğrulanamadı
+    """
+    import struct
+    from crccheck.crc import Crc32Mpeg2 as CRC32
+
+    # Sabitler
+    HEADER = Slave_Device.SERIAL_HEADER
+    BATCH_ID = Slave_Device._BROADCAST_ID
+    PING_PACKAGE_SIZE = 10
+    WRITE_SYNC = int(Device_Commands.WRITE_SYNC)
+    STATUS = 0
+
+    # Registry ve tip çözümü
+    reg = Slave_Device._vars_registry.get(device_family)
+    if reg is None:
+        raise RuntimeError(
+            f"Device family 0x{device_family:02X} için değişken tablosu bulunamadı. "
+            "Bu family’den en az bir cihaz instance'ı oluşturulmuş olmalı."
+        )
+
+    idx_int = int(index)
+    try:
+        var_type = reg[idx_int].type()  # 'f', 'i', 'B', ...
+    except Exception as e:
+        raise ValueError(f"Geçersiz index: {index} (family=0x{device_family:02X}).") from e
+
+    # id_value_pairs doğrula ve düzle
+    flat = []
+    for pair in id_value_pairs:
+        if (not isinstance(pair, (list, tuple))) or len(pair) != 2:
+            raise ValueError(f"{pair} geçersiz. [ID, value] olmalı.")
+        dev_id, val = pair
+        if not (0 <= int(dev_id) <= 254):
+            raise ValueError(f"ID {dev_id} geçersiz (0..254).")
+        # 'val' tipi Data_.type() ile belirlenecek; pack sırasında kontrol olur
+        flat.extend([int(dev_id), val])
+
+    count = len(flat) // 2
+    if count == 0:
+        raise ValueError("En az bir [ID, value] çifti gerekli.")
+
+    val_size = struct.calcsize('<' + var_type)
+
+    # Paket boyutu
+    # payload = index(1B) + her cihaz için (ID:1B + value:val_size)
+    payload_size = 1 + count * (1 + val_size)
+    package_size = PING_PACKAGE_SIZE + payload_size
+
+    # Format: header, BATCH_ID, family, size, cmd, status, index, (id, value)*N, crc
+    fmt = '<BBBBBB' + 'B' + ('B' + var_type) * count
+    data_no_crc = struct.pack(
+        fmt,
+        HEADER,
+        BATCH_ID,
+        device_family,
+        package_size,
+        WRITE_SYNC,
+        STATUS,
+        idx_int,
+        *flat
+    )
+    pkt = data_no_crc + struct.pack('<I', CRC32.calc(data_no_crc))
+
+    # Gönder
+    port._write_bus(pkt)
+
+    if not expect_ack:
+        return True
+
+    # Basit ACK okuma (PING_PACKAGE_SIZE kadar)
+    ack = port._read_bus(size=PING_PACKAGE_SIZE)
+    if not ack or len(ack) != PING_PACKAGE_SIZE:
+        return False
+
+    # CRC kontrolü
+    try:
+        data_part = ack[:-4]
+        crc_part = ack[-4:]
+        ok = (CRC32.calc(data_part) == struct.unpack('<I', crc_part)[0])
+        return bool(ok)
+    except Exception:
+        return False

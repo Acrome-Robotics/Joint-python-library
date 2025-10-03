@@ -324,3 +324,112 @@ class Joint(Slave_Device):
 		elif package_number == 3:
 			return self.get_variables(*classic_package)
 		
+
+
+def set_joint_variables_sync(port:SerialPort, parameter_idx, *idx_val_pairs):
+    """
+    Build & send a WRITE_SYNC packet:
+      [HEADER, 0xFF, DEVICE_FAMILY, LENGTH, WRITE_SYNC, 0, PARAM_IDX, (ID, VALUE)*, CRC32]
+    - parameter_idx: single parameter index to write on each target
+    - idx_val_pairs: variadic list of 2-tuples/lists like (id, value) or [id, value]
+    - port: SerialPort-like object that has write(bytes) method
+
+    Returns: number of bytes written.
+    Raises: ValueError on malformed inputs.
+    """
+
+    # --- Validate & fetch parameter meta
+    if parameter_idx not in VARS:
+        raise ValueError(f"Unknown parameter index: {parameter_idx}")
+
+    var_desc = VARS[parameter_idx]
+    val_fmt = var_desc.type()     # e.g., 'f', 'i', 'H', etc. (little-endian will be applied later)
+    val_size = var_desc.size()    # size in bytes
+
+    # --- Validate pairs; normalize to tuples
+    pairs = []
+    for p in idx_val_pairs:
+        if not hasattr(p, '__len__') or len(p) != 2:
+            raise ValueError(f"{p} must be a pair like [ID, value]")
+        dev_id, value = p[0], p[1]
+
+        # Device ID range (0..254), 255 is reserved for broadcast in header
+        if not (0 <= int(dev_id) <= 254):
+            raise ValueError(f"Device ID out of range (0..254): {dev_id}")
+
+        pairs.append((int(dev_id), value))
+
+    if not pairs:
+        raise ValueError("At least one [ID, value] pair is required.")
+
+    # --- Compute size field used by your protocol
+    # Payload after the 6 fixed header bytes:
+    #   PARAM_IDX (1 byte)
+    # + for each pair: ID (1 byte) + VALUE (val_size bytes)
+    payload_size = 1 + len(pairs) * (1 + val_size)
+
+    # Protocol total-length field used in your other function:
+    # size + PING_PACKAGE_SIZE (to mirror your existing framing)
+    length_field = payload_size + PING_PACKAGE_SIZE
+
+    # --- Build struct format string & flat args
+    # Fixed header: '<BBBBBB'
+    # Then: PARAM_IDX (B)
+    # Then for each pair: ID (B) + VALUE (val_fmt)
+    fmt = '<BBBBBB' + 'B' + ''.join(['B' + val_fmt for _ in pairs])
+
+    flat = [
+        dev.SERIAL_HEADER,			# header
+        0xFF,                   # broadcast ID
+        DEVICE_FAMILY,          # device family
+        length_field,           # total length field
+        Device_Commands.WRITE_SYNC,  # command
+        0x00,                   # reserved
+        int(parameter_idx),     # parameter index
+    ]
+
+    # Append all (ID, VALUE) flattened; VALUE goes in native python type, struct packs it
+    for dev_id, value in pairs:
+        flat.append(dev_id)
+        flat.append(value)
+
+    # --- Pack without CRC
+    pkt_wo_crc = struct.pack(fmt, *flat)
+
+    # --- Append CRC32 (little-endian uint32 of the bytes above)
+    pkt = pkt_wo_crc + struct.pack('<I', CRC32.calc(pkt_wo_crc))
+
+    # --- Send over the provided port (broadcast sync write typically has no ACK)
+    written = port.write(pkt)
+    return written
+
+
+def set_variables(self, *idx_val_pairs, ack = False):
+        # returns : did ACK come?
+        fmt_str = '<BBBBBB'
+        var_count = 0
+        size = 0
+        for one_pair in idx_val_pairs:
+            try:
+                if len(one_pair) != 2:
+                    raise ValueError(f"{one_pair} more than a pair! It is not a pair")
+                else:
+                    fmt_str += ('B' + self._vars[one_pair[0]].type())
+                    var_count+=1
+                    size += (1 + self._vars[one_pair[0]].size())
+            except:
+                raise ValueError(f"{one_pair} is not proper pair")
+        
+        flattened_list = [item for sublist in idx_val_pairs for item in sublist]
+
+        struct_out = list(struct.pack(fmt_str, *[self._header, self._id, self._device_family, size + PING_PACKAGE_SIZE, Device_Commands.WRITE, 0, *flattened_list]))
+        struct_out = bytes(struct_out) + struct.pack('<' + 'I', CRC32.calc(struct_out))
+        self._ack_size = PING_PACKAGE_SIZE
+
+        self._write_port(struct_out)
+        if(self.write_ack_enable):
+            if self._read_ack():
+                return True
+            else:
+                return False
+        return False
