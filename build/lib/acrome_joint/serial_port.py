@@ -7,13 +7,24 @@ def whichOS():
 
 
 def list_USB_serial_ports():
+    _list = []
     if whichOS() == "Windows":
         ports = list(serial.tools.list_ports.comports())
-        return ports
+        if ports:
+            for port, desc, hwid in sorted(ports):
+                _list.append(desc)
+        else:
+            return None
         
     if whichOS() == "Linux":
         ports = list(serial.tools.list_ports.comports())
-        return ports
+        if ports:
+            for port, desc, hwid in sorted(ports):
+                _list.append(desc)
+        else:
+            return None
+        
+    return _list
 
 
 

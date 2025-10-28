@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: Joint-python-library
-Version: 0.0.5
+Version: 0.0.7
 Summary: Python library for interfacing with Acrome Robotic Arm Joint BLDC Motor Controllers. This Python library provides an easy-to-use interface for communication and control of BLDC motor controllers used in Acrome robotic arm joints. It is designed to simplify the integration of Acrome’s robotic joint actuators into custom applications, allowing developers and researchers to focus on building advanced robotic systems without dealing with low-level communication details.
 Home-page: https://github.com/Acrome-Smart-Motion-Devices/python-library-new
 Author: BeratComputer
