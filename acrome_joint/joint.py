@@ -12,7 +12,8 @@ from acrome_joint.Slave_Device import *
 
 
 # enter here for extra commands: 
-#class Device_ExtraCommands(enum.IntEnum):
+class Device_ExtraCommands(enum.IntEnum):
+	PROTOCOL_RESET_ABSOLUTE_ENCODER = 0x11
 	# .......... start with 11
 	# .......... end of extra commmands max: 39
 
@@ -143,7 +144,7 @@ class Joint(Slave_Device):
 			Data_(Index_Joint.current_Id, 'f'),
 			Data_(Index_Joint.current_Iq, 'f'),
 			Data_(Index_Joint.current_velocity, 'f'),
-			Data_(Index_Joint.current_position, 'i'),
+			Data_(Index_Joint.current_position, 'f'),
 			Data_(Index_Joint.current_electrical_degree, 'f'),
 			Data_(Index_Joint.current_electrical_radian, 'f'),
 			Data_(Index_Joint.setpoint_current, 'f'),
@@ -323,6 +324,9 @@ class Joint(Slave_Device):
 		
 		elif package_number == 3:
 			return self.get_variables(*classic_package)
+		
+	def reset_absolute_encoder(self):
+		self._pure_command_send(Device_ExtraCommands.PROTOCOL_RESET_ABSOLUTE_ENCODER)
 		
 
 
