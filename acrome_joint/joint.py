@@ -329,111 +329,100 @@ class Joint(Slave_Device):
 		self._pure_command_send(Device_ExtraCommands.PROTOCOL_RESET_ABSOLUTE_ENCODER)
 		
 
-
-def set_joint_variables_sync(port:SerialPort, parameter_idx, *idx_val_pairs):
+def set_joint_variables_sync(port: SerialPort, parameter_idx, *idx_val_pairs):
     """
-    Build & send a WRITE_SYNC packet:
-      [HEADER, 0xFF, DEVICE_FAMILY, LENGTH, WRITE_SYNC, 0, PARAM_IDX, (ID, VALUE)*, CRC32]
-    - parameter_idx: single parameter index to write on each target
-    - idx_val_pairs: variadic list of 2-tuples/lists like (id, value) or [id, value]
-    - port: SerialPort-like object that has write(bytes) method
-
-    Returns: number of bytes written.
-    Raises: ValueError on malformed inputs.
+    Sync Write paketi oluşturur ve gönderir.
+    
+    Args:
+        port: SerialPort nesnesi.
+        parameter_idx: Index_Joint enum değeri (örn: Index_Joint.Enable).
+        idx_val_pairs: [DeviceID, Value] listeleri. Örn: [0, True], [1, True]
     """
+    
+    # 1. Port Kontrolü
+    if port is None:
+        raise ValueError("Port tanımlı değil.")
 
-    # --- Validate & fetch parameter meta
-    if parameter_idx not in VARS:
-        raise ValueError(f"Unknown parameter index: {parameter_idx}")
+    # 2. Referans Cihaz Oluşturma
+    # Data_ yapısındaki .type() ve .size() metotlarına erişmek için.
+    try:
+        ref_device = Joint(0, port)
+    except Exception as e:
+        raise ValueError(f"Referans Joint nesnesi oluşturulamadı: {e}")
 
-    var_desc = VARS[parameter_idx]
-    val_fmt = var_desc.type()     # e.g., 'f', 'i', 'H', etc. (little-endian will be applied later)
-    val_size = var_desc.size()    # size in bytes
+    # 3. Parametre Bilgilerini Çekme
+    try:
+        var_desc = ref_device._vars[parameter_idx]
+    except IndexError:
+        raise ValueError(f"Bilinmeyen parametre indeksi: {parameter_idx}")
+    except AttributeError:
+        raise ValueError("Joint nesnesinde '_vars' listesi bulunamadı.")
 
-    # --- Validate pairs; normalize to tuples
+    # --- DÜZELTME BURADA ---
+    # .type ve .size muhtemelen metot olduğu için () ile çağırıyoruz.
+    val_fmt = var_desc.type()  # 'f', 'B', 'I' vb. döndürür
+    val_size = var_desc.size() # 4, 1 vb. int döndürür
+
+    # 4. Veri Çiftlerini Doğrulama
     pairs = []
     for p in idx_val_pairs:
         if not hasattr(p, '__len__') or len(p) != 2:
-            raise ValueError(f"{p} must be a pair like [ID, value]")
+            raise ValueError(f"Hatalı veri çifti: {p}. Format [ID, Value] olmalı.")
+        
         dev_id, value = p[0], p[1]
-
-        # Device ID range (0..254), 255 is reserved for broadcast in header
+        
+        # ID Kontrolü
         if not (0 <= int(dev_id) <= 254):
-            raise ValueError(f"Device ID out of range (0..254): {dev_id}")
+            raise ValueError(f"Device ID aralık dışı (0..254): {dev_id}")
 
         pairs.append((int(dev_id), value))
 
     if not pairs:
-        raise ValueError("At least one [ID, value] pair is required.")
+        raise ValueError("Gönderilecek veri çifti bulunamadı.")
 
-    # --- Compute size field used by your protocol
-    # Payload after the 6 fixed header bytes:
-    #   PARAM_IDX (1 byte)
-    # + for each pair: ID (1 byte) + VALUE (val_size bytes)
+    # 5. Paket Boyutlarını Hesaplama
+    # Payload: [PARAM_IDX] + ([ID] + [VALUE]) * N
+    # Artık val_size bir int olduğu için toplama işlemi çalışacaktır.
     payload_size = 1 + len(pairs) * (1 + val_size)
+    
+    length_field = payload_size + Joint._PACKAGE_ESSENTIAL_SIZE + 4  # 4 byte CRC ekle
 
-    # Protocol total-length field used in your other function:
-    # size + PING_PACKAGE_SIZE (to mirror your existing framing)
-    length_field = payload_size + PING_PACKAGE_SIZE
-
-    # --- Build struct format string & flat args
-    # Fixed header: '<BBBBBB'
-    # Then: PARAM_IDX (B)
-    # Then for each pair: ID (B) + VALUE (val_fmt)
+    # 6. Struct Formatını Hazırlama
+    # Header(6 byte) + ParamIdx(1 byte) + (DevID(1 byte) + Value(N byte)) * Adet
     fmt = '<BBBBBB' + 'B' + ''.join(['B' + val_fmt for _ in pairs])
 
+    # 7. Paket İçeriği (Header, ID, Family, Length, Command...)
+    HEADER_BYTE = 0x55
+    BROADCAST_ID = 0xFF
+    CMD_WRITE_SYNC = Device_Commands.WRITE_SYNC
+    device_family = Joint._PRODUCT_TYPE 
+
     flat = [
-        dev.SERIAL_HEADER,			# header
-        0xFF,                   # broadcast ID
-        DEVICE_FAMILY,          # device family
-        length_field,           # total length field
-        Device_Commands.WRITE_SYNC,  # command
-        0x00,                   # reserved
-        int(parameter_idx),     # parameter index
+        HEADER_BYTE,        # Header
+        BROADCAST_ID,       # Broadcast ID (0xFF)
+        device_family,      # Device Family
+        length_field,       # Length
+        CMD_WRITE_SYNC,     # Command
+        0x00,               # Status
+        int(parameter_idx), # Parametre ID
     ]
 
-    # Append all (ID, VALUE) flattened; VALUE goes in native python type, struct packs it
+    # Değerleri ekle
     for dev_id, value in pairs:
         flat.append(dev_id)
         flat.append(value)
 
-    # --- Pack without CRC
-    pkt_wo_crc = struct.pack(fmt, *flat)
+    # 8. Paketleme
+    try:
+        pkt_wo_crc = struct.pack(fmt, *flat)
+    except struct.error as e:
+        # Genellikle float yerine int veya tam tersi gelince oluşur
+        raise ValueError(f"Struct paketleme hatası (Veri tipi uyumsuzluğu): {e}")
 
-    # --- Append CRC32 (little-endian uint32 of the bytes above)
-    pkt = pkt_wo_crc + struct.pack('<I', CRC32.calc(pkt_wo_crc))
+    # 9. CRC32
+    crc_val = CRC32.calc(pkt_wo_crc)
+    pkt = pkt_wo_crc + struct.pack('<I', crc_val)
 
-    # --- Send over the provided port (broadcast sync write typically has no ACK)
-    written = port.write(pkt)
+    # 10. Gönder
+    written = port._write_bus(pkt)
     return written
-
-
-def set_variables(self, *idx_val_pairs, ack = False):
-        # returns : did ACK come?
-        fmt_str = '<BBBBBB'
-        var_count = 0
-        size = 0
-        for one_pair in idx_val_pairs:
-            try:
-                if len(one_pair) != 2:
-                    raise ValueError(f"{one_pair} more than a pair! It is not a pair")
-                else:
-                    fmt_str += ('B' + self._vars[one_pair[0]].type())
-                    var_count+=1
-                    size += (1 + self._vars[one_pair[0]].size())
-            except:
-                raise ValueError(f"{one_pair} is not proper pair")
-        
-        flattened_list = [item for sublist in idx_val_pairs for item in sublist]
-
-        struct_out = list(struct.pack(fmt_str, *[self._header, self._id, self._device_family, size + PING_PACKAGE_SIZE, Device_Commands.WRITE, 0, *flattened_list]))
-        struct_out = bytes(struct_out) + struct.pack('<' + 'I', CRC32.calc(struct_out))
-        self._ack_size = PING_PACKAGE_SIZE
-
-        self._write_port(struct_out)
-        if(self.write_ack_enable):
-            if self._read_ack():
-                return True
-            else:
-                return False
-        return False
