@@ -165,6 +165,22 @@ QSlider::sub-page:horizontal {
     border-top: 1px solid #2e2f3e;
     padding: 8px 16px;
 }
+#AutoSyncBtn {
+    background-color: #d97706;  /* orange/amber */
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 24px;
+    font-size: 14px;
+    font-weight: bold;
+    min-width: 180px;
+}
+#AutoSyncBtn:hover   { background-color: #b45309; }
+#AutoSyncBtn:pressed { background-color: #92400e; }
+#AutoSyncBtn:checked { background-color: #047857; }  /* green when ON */
+#AutoSyncBtn:checked:hover { background-color: #059669; }
+#AutoSyncBtn:disabled { background-color: #374151; color: #6b7280; }
+
 #SyncDriveBtn {
     background-color: #059669;
     color: white;
@@ -320,6 +336,7 @@ class MainWindow(QMainWindow):
         for i in range(4):
             panel = JointPanel(i)
             panel.enable_changed.connect(self._on_enable_changed)
+            panel.pos_slider.valueChanged.connect(self._on_setpoints_changed)
             h_layout.addWidget(panel, stretch=1)
             self.panels.append(panel)
 
@@ -345,7 +362,13 @@ class MainWindow(QMainWindow):
         self.torque_btn.toggled.connect(self._on_torque_toggle)
         layout.addWidget(self.torque_btn)
 
-        self.sync_btn = QPushButton("⚡  Sync Drive")
+        self.auto_sync_btn = QPushButton("🔄 Auto Sync: OFF")
+        self.auto_sync_btn.setObjectName("AutoSyncBtn")
+        self.auto_sync_btn.setCheckable(True)
+        self.auto_sync_btn.toggled.connect(self._on_auto_sync_toggle)
+        layout.addWidget(self.auto_sync_btn)
+
+        self.sync_btn = QPushButton("⚡  Sync Drive (Once)")
         self.sync_btn.setObjectName("SyncDriveBtn")
         self.sync_btn.clicked.connect(self._on_sync_drive)
         layout.addWidget(self.sync_btn)
@@ -438,6 +461,16 @@ class MainWindow(QMainWindow):
         self._worker.update_joint_enables(flags)
         self._update_action_buttons()
 
+    def _on_setpoints_changed(self):
+        setpoints = {i: float(p.get_setpoint()) for i, p in enumerate(self.panels)}
+        self._worker.set_auto_setpoints(setpoints)
+
+    def _on_auto_sync_toggle(self, checked: bool):
+        self.auto_sync_btn.setText(f"🔄 Auto Sync: {'ON' if checked else 'OFF'}")
+        self._on_setpoints_changed()
+        self._worker.set_auto_sync(checked)
+        self._update_action_buttons()
+
     def _on_sync_drive(self):
         setpoints = {}
         for i, panel in enumerate(self.panels):
@@ -454,8 +487,12 @@ class MainWindow(QMainWindow):
     def _update_action_buttons(self):
         any_enabled = any(p.is_enabled() for p in self.panels)
         ok = self._connected and any_enabled
-        self.sync_btn.setEnabled(ok)
         self.torque_btn.setEnabled(ok)
+        
+        is_auto_sync = hasattr(self, 'auto_sync_btn') and self.auto_sync_btn.isChecked()
+        if hasattr(self, 'auto_sync_btn'):
+            self.auto_sync_btn.setEnabled(ok)
+        self.sync_btn.setEnabled(ok and not is_auto_sync)
 
     # ------------------------------------------------------------------ #
     #  Cleanup

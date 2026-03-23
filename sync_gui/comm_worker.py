@@ -40,6 +40,10 @@ class CommWorker(QThread):
         self._pending_sync_drive: dict | None = None    # {joint_id: degrees}
         self._pending_torque: tuple | None = None       # (enabled: bool, [flags])
 
+        # Auto Sync State
+        self._auto_sync = False
+        self._auto_setpoints = {}
+
     # ------------------------------------------------------------------ #
     #  Connection management (called from GUI thread)
     # ------------------------------------------------------------------ #
@@ -83,6 +87,14 @@ class CommWorker(QThread):
         with QMutexLocker(self._mutex):
             self._pending_torque = (enabled, list(joint_enables))
 
+    def set_auto_sync(self, enabled: bool):
+        with QMutexLocker(self._mutex):
+            self._auto_sync = enabled
+
+    def set_auto_setpoints(self, setpoints: dict):
+        with QMutexLocker(self._mutex):
+            self._auto_setpoints = dict(setpoints)
+
     def stop(self):
         self._running = False
 
@@ -91,6 +103,10 @@ class CommWorker(QThread):
     # ------------------------------------------------------------------ #
     def run(self):
         self._running = True
+        last_sync_time = 0.0
+        last_poll_time = 0.0
+        poll_jid = 0
+
         while self._running:
             with QMutexLocker(self._mutex):
                 port    = self._port
@@ -102,9 +118,14 @@ class CommWorker(QThread):
                 self._pending_sync_drive = None
                 self._pending_torque     = None
 
+                auto_sync = self._auto_sync
+                auto_setpoints = dict(self._auto_setpoints)
+
             if port is None:
                 time.sleep(0.1)
                 continue
+
+            now = time.time()
 
             # ── Pending: Torque enable ────────────────────────────────
             if torque_cmd is not None:
@@ -137,31 +158,54 @@ class CommWorker(QThread):
                     except Exception as e:
                         print(f"[SYNC DRIVE] HATA: {e}")
 
-            # ── Polling: read status from each enabled joint ──────────
-            for jid in range(4):
-                if not enables[jid]:
-                    continue
-                joint = joints[jid]
-                if joint is None:
-                    continue
-                ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                try:
-                    result = joint.get_currentStatus_parameters()
-                    if result and result[0] is not None:
-                        pos  = result[4] if len(result) > 4 else '?'
-                        vel  = result[3] if len(result) > 3 else '?'
-                        temp = result[5] if len(result) > 5 else '?'
-                        print(f"[{ts}] [POLL J{jid}] pos={pos:.2f}°  vel={vel:.2f}  temp={temp:.1f}°C")
-                        self.data_ready.emit(jid, result)
-                    else:
-                        print(f"[{ts}] [POLL J{jid}] TIMEOUT / boş yanıt")
-                        self.timeout_event.emit(jid)
-                except Exception as e:
-                    print(f"[{ts}] [POLL J{jid}] HATA: {e}")
-                    self.timeout_event.emit(jid)
+            # ── Auto Sync Drive (20ms frequency) ──────────────────────
+            if auto_sync:
+                if (now - last_sync_time) >= 0.020:
+                    pairs = [[jid, deg] for jid, deg in auto_setpoints.items() if enables[jid]]
+                    if pairs:
+                        try:
+                            set_joint_variables_sync(
+                                port,
+                                Index_Joint.setpoint_position,
+                                *pairs
+                            )
+                        except Exception as e:
+                            print(f"[AUTO SYNC] HATA: {e}")
+                    last_sync_time = time.time()
+                    now = time.time()
 
-                time.sleep(POLL_INTERVAL_MS / 1000.0)
+            # ── Polling: read status multiplexed ──────────────────────
+            if any(enables):
+                if (now - last_poll_time) >= (POLL_INTERVAL_MS / 1000.0):
+                    # Find the next enabled joint
+                    for _ in range(4):
+                        jid = poll_jid % 4
+                        poll_jid += 1
+                        joint = joints[jid]
+                        if enables[jid] and joint is not None:
+                            ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                            try:
+                                result = joint.get_currentStatus_parameters()
+                                if result and result[0] is not None:
+                                    pos  = result[4] if len(result) > 4 else '?'
+                                    vel  = result[3] if len(result) > 3 else '?'
+                                    temp = result[5] if len(result) > 5 else '?'
+                                    # print(f"[{ts}] [POLL J{jid}] pos={pos:.2f}°")  # optional: reduce logging noise
+                                    self.data_ready.emit(jid, result)
+                                else:
+                                    print(f"[{ts}] [POLL J{jid}] TIMEOUT / boş yanıt")
+                                    self.timeout_event.emit(jid)
+                            except Exception as e:
+                                print(f"[{ts}] [POLL J{jid}] HATA: {e}")
+                                self.timeout_event.emit(jid)
 
-            # Small sleep when no joints enabled to avoid busy loop
-            if not any(enables):
-                time.sleep(0.1)
+                            # Poll only ONE joint per interval, break out
+                            break
+                            
+                    last_poll_time = time.time()
+            else:
+                # Keep resetting last_poll_time when no joints are enabled
+                last_poll_time = now
+
+            # Small sleep to yield CPU and prevent 100% core usage
+            time.sleep(0.002)
