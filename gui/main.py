@@ -546,6 +546,7 @@ class OperationTab(QtWidgets.QWidget):
                     continue
                 try:
                     idx = Index_Joint[nm]
+                    print(f"Pulling {nm} (Index {idx})")
                     out[nm] = Device.get_variables(idx)[0]
                 except Exception:
                     out[nm] = ""

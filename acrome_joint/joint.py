@@ -283,7 +283,17 @@ class Joint(Slave_Device):
 		return super().set_variables(*idx_val_pairs, ack=ack)
 
 
+	def get_currentStatus_parameters(self):
+		classic_package = [
+			Index_Joint.Enable,
+			Index_Joint.current_Id, Index_Joint.current_Iq,
+			Index_Joint.current_velocity, Index_Joint.current_position,
+			Index_Joint.Temprature_read,
+			Index_Joint.setpoint_current, Index_Joint.setpoint_velocity, Index_Joint.setpoint_position
+		]
+		return self.get_variables(*classic_package)
 
+		
 	def get_FOC_parameters(self, package_number:int):
 		if package_number >= 4:
 			raise "invalid package number ex: 0, 1, 2"
